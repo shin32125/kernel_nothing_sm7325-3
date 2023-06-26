@@ -180,25 +180,6 @@ static const struct backlight_ops sde_backlight_device_ops = {
 	.get_brightness = sde_backlight_device_get_brightness,
 };
 
-void sde_connector_hbm_control(struct sde_connector *c_conn,
-	bool status)
-{
-	struct dsi_display *display;
-
-	display = (struct dsi_display *) c_conn->display;
-	if (rm692e5_aod_flag == 1) {
-		if (status) {
-			dsi_panel_set_nolp(display->panel);
-		} else {
-			dsi_panel_set_lp1(display->panel);
-		}
-	}
-
-	rm692e5_hbm_flag = status ? 1 : 0;
-
-	sde_backlight_device_update_status(c_conn->bl_device);
-}
-
 static int sde_backlight_cooling_cb(struct notifier_block *nb,
 					unsigned long val, void *data)
 {
@@ -929,59 +910,6 @@ struct sde_connector_dyn_hdr_metadata *sde_connector_get_dyn_hdr_meta(
 	return &c_state->dyn_hdr_meta;
 }
 
-static bool sde_connector_fod_dim_layer_status(struct sde_connector *c_conn)
-{
-	if (!c_conn->encoder || !c_conn->encoder->crtc ||
-	    !c_conn->encoder->crtc->state)
-		return false;
-
-	return !!to_sde_crtc_state(c_conn->encoder->crtc->state)->fod_dim_layer;
-}
-
-struct dsi_panel *sde_connector_panel(struct sde_connector *c_conn)
-{
-	struct dsi_display *display = (struct dsi_display *)c_conn->display;
-
-	return display ? display->panel : NULL;
-}
-
-static void sde_connector_pre_update_fod_hbm(struct sde_connector *c_conn)
-{
-	struct dsi_panel *panel;
-	bool status;
-
-	panel = sde_connector_panel(c_conn);
-	if (!panel)
-		return;
-
-	status = sde_connector_fod_dim_layer_status(c_conn);
-	if (status == dsi_panel_get_fod_ui(panel))
-		return;
-
-	if (status)
-		sde_encoder_wait_for_event(c_conn->encoder, MSM_ENC_VBLANK);
-
-	if (status) {
-		if (rm692e5_aod_flag == 1) {
-			dsi_panel_set_nolp(panel);
-		}
-		rm692e5_hbm_flag = 1;
-	} else {
-		if (rm692e5_aod_flag == 1) {
-			dsi_panel_set_lp1(panel);
-		}
-		rm692e5_hbm_flag = 0;
-	}
-
-	panel->fod_hbm_enabled = status;
-	sde_backlight_device_update_status(c_conn->bl_device);
-
-	if (!status)
-		sde_encoder_wait_for_event(c_conn->encoder, MSM_ENC_VBLANK);
-
-	dsi_panel_set_fod_ui(panel, status);
-}
-
 int sde_connector_pre_kickoff(struct drm_connector *connector)
 {
 	struct sde_connector *c_conn;
@@ -1034,9 +962,6 @@ int sde_connector_pre_kickoff(struct drm_connector *connector)
 	params.hdr_meta = &c_state->hdr_meta;
 
 	SDE_EVT32_VERBOSE(connector->base.id);
-
-	if (c_conn->connector_type == DRM_MODE_CONNECTOR_DSI)
-		sde_connector_pre_update_fod_hbm(c_conn);
 
 	rc = c_conn->ops.pre_kickoff(connector, c_conn->display, &params);
 
@@ -3193,6 +3118,7 @@ end:
 	sde_vm_unlock(sde_kms);
 	kfree(input);
 	return rc;
+
 }
 
 static ssize_t tx_cmd_show(struct device *device,
@@ -3308,6 +3234,8 @@ end1:
 end:
 	kfree(input);
 	return rc;
+
+
 }
 
 static ssize_t rx_cmd_show(struct device *device,
@@ -3373,6 +3301,7 @@ static ssize_t panel_id_show(struct device *device,
 	c_conn = to_sde_connector(connector);
 
 	tx_cmd_store(device, NULL, change_page_cmd, code_len);
+
 	rx_cmd_store(device, NULL, read_id_cmd, code_len);
 
 	SDE_ERROR("ccc rx_cmd_show before c_conn->cmd_rx_buf[0] = 0x%.2x\n", c_conn->cmd_rx_buf[0]);
