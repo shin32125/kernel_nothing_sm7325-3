@@ -36,7 +36,7 @@
 #define DEFAULT_PANEL_PREFILL_LINES	25
 #define HIGH_REFRESH_RATE_THRESHOLD_TIME_US	500
 #define MIN_PREFILL_LINES      40
-#define WAITING_FOR_TE_MAX_TIMES	17
+#define WAITING_FOR_TE_MAX_TIMES		17
 #define BACKLIGHT_HBM_LEVEL		4094
 
 static void dsi_dce_prepare_pps_header(char *buf, u32 pps_delay_ms)
@@ -392,7 +392,7 @@ static int dsi_panel_power_off(struct dsi_panel *panel)
 					!panel->reset_gpio_always_on)
 		gpio_set_value(panel->reset_config.reset_gpio, 0);
 
-	if (!strcmp("rm692e5 amoled fhd+ 120hz cmd mode dsi visionox panel", panel->name))
+	if(!strcmp("rm692e5 amoled fhd+ 120hz cmd mode dsi visionox panel", panel->name))
 		mdelay(2);
 
 	if (gpio_is_valid(panel->reset_config.lcd_mode_sel_gpio))
@@ -624,27 +624,21 @@ error:
 	return rc;
 }
 
-static u32 dsi_panel_get_backlight(struct dsi_panel *panel)
-{
-	return panel->bl_config.real_bl_level;
-}
-
 static u32 interpolate(uint32_t x, uint32_t xa, uint32_t xb,
 		       uint32_t ya, uint32_t yb)
 {
 	return ya - (ya - yb) * (x - xa) / (xb - xa);
 }
 
-static u32 dsi_panel_get_fod_dim_alpha(struct dsi_panel *panel)
+static u32 dsi_panel_calc_fod_dim_alpha(struct dsi_panel *panel, u32 bl_level)
 {
-	u32 brightness = dsi_panel_get_backlight(panel);
 	int i;
 
 	if (!panel->fod_dim_lut)
 		return 0;
 
 	for (i = 0; i < panel->fod_dim_lut_len; i++)
-		if (panel->fod_dim_lut[i].brightness >= brightness)
+		if (panel->fod_dim_lut[i].brightness >= bl_level)
 			break;
 
 	if (i == 0)
@@ -653,11 +647,22 @@ static u32 dsi_panel_get_fod_dim_alpha(struct dsi_panel *panel)
 	if (i == panel->fod_dim_lut_len)
 		return panel->fod_dim_lut[i - 1].alpha;
 
-	return interpolate(brightness,
+	return interpolate(bl_level,
 			   panel->fod_dim_lut[i - 1].brightness,
 			   panel->fod_dim_lut[i].brightness,
 			   panel->fod_dim_lut[i - 1].alpha,
 			   panel->fod_dim_lut[i].alpha);
+}
+
+u8 dsi_panel_get_fod_dim_alpha(struct dsi_panel *panel)
+{
+	u8 alpha;
+
+	mutex_lock(&panel->panel_lock);
+	alpha = panel->fod_dim_alpha;
+	mutex_unlock(&panel->panel_lock);
+
+	return alpha;
 }
 
 int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
@@ -686,7 +691,7 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 		rc = -ENOTSUPP;
 	}
 
-	panel->fod_dim_alpha = dsi_panel_get_fod_dim_alpha(panel);
+	panel->fod_dim_alpha = dsi_panel_calc_fod_dim_alpha(panel, panel->bl_config.real_bl_level);
 
 	return rc;
 }
@@ -2107,14 +2112,12 @@ static int dsi_panel_parse_misc_features(struct dsi_panel *panel)
 	const char *string;
 	int i, rc = 0;
 
-	panel->ulps_feature_enabled =
-		utils->read_bool(utils->data, "qcom,ulps-enabled");
+	panel->ulps_feature_enabled = true;
 
 	DSI_DEBUG("%s: ulps feature %s\n", __func__,
 		(panel->ulps_feature_enabled ? "enabled" : "disabled"));
 
-	panel->ulps_suspend_enabled =
-		utils->read_bool(utils->data, "qcom,suspend-ulps-enabled");
+	panel->ulps_suspend_enabled = true;
 
 	DSI_DEBUG("%s: ulps during suspend feature %s\n", __func__,
 		(panel->ulps_suspend_enabled ? "enabled" : "disabled"));
@@ -2534,7 +2537,7 @@ static int dsi_panel_parse_bl_config(struct dsi_panel *panel)
 	rc = utils->read_u32(utils->data, "qcom,mdss-dsi-bl-hbm-level", &val);
 	if (rc) {
 		DSI_DEBUG("[%s] bl-hbm-level unspecified, defaulting to hbm level\n",
-		          panel->name);
+			 panel->name);
 		panel->bl_config.bl_hbm_level = HBM_BL_LEVEL;
 	} else {
 		panel->bl_config.bl_hbm_level = val;
